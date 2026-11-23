@@ -4,6 +4,7 @@ import re
 import time
 import shutil
 import secrets
+import ipaddress
 import threading
 import subprocess
 from pathlib import Path
@@ -87,7 +88,7 @@ async def security_and_rate_middleware(request: Request, call_next):
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
-    
+
     if request.url.path.startswith("/soc/") or request.url.path.startswith("/setup"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Content-Security-Policy"] = (
@@ -106,14 +107,14 @@ def verify_soc_analyst(request: Request, credentials: HTTPBasicCredentials = Dep
     if check_auth_lockout(client_ip):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Çok fazla hatalı giriş denemesi. 15 dakika kilitlendi."
+            detail="Cok fazla hatali giris denemesi. 15 dakika kilitlendi."
         )
 
     expected_user = os.getenv("SOC_USERNAME", "admin")
     expected_pass = os.getenv("SOC_PASSWORD", "AdHDF_Soc2026!")
     is_user_ok = secrets.compare_digest(credentials.username.encode("utf8"), expected_user.encode("utf8"))
     is_pass_ok = secrets.compare_digest(credentials.password.encode("utf8"), expected_pass.encode("utf8"))
-    
+
     if not (is_user_ok and is_pass_ok):
         register_failed_auth(client_ip)
         raise HTTPException(
@@ -192,9 +193,9 @@ async def setup_page():
 @app.post("/setup/init")
 async def complete_initial_setup(payload: InitialSetupRequest):
     if is_setup_completed():
-        raise HTTPException(status_code=403, detail="Kurulum zaten tamamlanmış.")
+        raise HTTPException(status_code=403, detail="Kurulum zaten tamamlanmis.")
     if len(payload.username.strip()) < 3 or len(payload.password) < 8:
-        raise HTTPException(status_code=400, detail="Kullanıcı adı en az 3, parola en az 8 karakter olmalıdır.")
+        raise HTTPException(status_code=400, detail="Kullanici adi en az 3, parola en az 8 karakter olmalidir.")
     updates = {
         "SOC_USERNAME": payload.username.strip(),
         "SOC_PASSWORD": payload.password,
@@ -216,7 +217,10 @@ async def discover_local_llms(analyst: str = Depends(verify_soc_analyst)):
 
 @app.post("/soc/llm/test")
 async def test_local_llm(cfg: EngineConfigUpdate, analyst: str = Depends(verify_soc_analyst)):
-    return probe_llm_endpoint(cfg.base_url, cfg.api_key)
+    try:
+        return probe_llm_endpoint(cfg.base_url, cfg.api_key)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
 
 @app.get("/soc/config")
 async def read_engine_config(analyst: str = Depends(verify_soc_analyst)):
@@ -227,14 +231,18 @@ async def read_engine_config(analyst: str = Depends(verify_soc_analyst)):
 
 @app.post("/soc/config")
 async def update_engine_config(cfg: EngineConfigUpdate, analyst: str = Depends(verify_soc_analyst)):
+    try:
+        safe_url = normalize_openai_base_url(cfg.base_url)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
     mode = "static_only" if cfg.mode == "static_only" else "hybrid_ai"
     ttl = max(0, min(720, int(cfg.ban_ttl_hours)))
     updates = {
         "DECEPTION_MODE": mode,
-        "LLM_BASE_URL": normalize_openai_base_url(cfg.base_url),
-        "LLM_MODEL": cfg.model.strip(),
-        "LLM_API_KEY": cfg.api_key.strip() or "ollama",
-        "BAN_TTL_HOURS": str(ttl)
+        "LLM_BASE_URL": safe_url,
+        "LLM_MODEL": cfg.model.strip()[:100],
+        "LLM_API_KEY": (cfg.api_key or "ollama").strip()[:120] or "ollama",
+        "BAN_TTL_HOURS": str(ttl),
     }
     for k, v in updates.items():
         os.environ[k] = v
@@ -243,8 +251,12 @@ async def update_engine_config(cfg: EngineConfigUpdate, analyst: str = Depends(v
 
 @app.post("/soc/unban")
 async def unban_attacker_ip(req: UnbanRequest, analyst: str = Depends(verify_soc_analyst)):
-    unban_ip_address(req.ip.strip())
-    return {"status": "unbanned", "ip": req.ip.strip()}
+    try:
+        clean_ip = ipaddress.ip_address(req.ip.strip()).compressed
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Gecersiz IP adresi.")
+    unban_ip_address(clean_ip)
+    return {"status": "unbanned", "ip": clean_ip}
 
 def _monitor_tunnel_output(proc):
     for line in iter(proc.stderr.readline, ""):
@@ -263,7 +275,7 @@ async def start_public_tunnel(analyst: str = Depends(verify_soc_analyst)):
         return {"running": True, "url": _TUNNEL_STATE["url"]}
     cf_bin = shutil.which("cloudflared") or (r"C:\AdHDF\cloudflared.exe" if os.path.exists(r"C:\AdHDF\cloudflared.exe") else None)
     if not cf_bin:
-        return JSONResponse(status_code=400, content={"running": False, "error": "cloudflared.exe bulunamadı (winget install Cloudflare.cloudflared)"})
+        return JSONResponse(status_code=400, content={"running": False, "error": "cloudflared.exe bulunamadi (winget install Cloudflare.cloudflared)"})
     port = os.getenv("ACTIVE_APP_PORT", "8000")
     proc = subprocess.Popen(
         [cf_bin, "tunnel", "--url", f"http://127.0.0.1:{port}"],
@@ -277,7 +289,7 @@ async def start_public_tunnel(analyst: str = Depends(verify_soc_analyst)):
         if _TUNNEL_STATE["url"]:
             return {"running": True, "url": _TUNNEL_STATE["url"]}
         time.sleep(0.3)
-    return {"running": True, "url": "Tünel başlatılıyor, birkaç saniye içinde yenileyin..."}
+    return {"running": True, "url": "Tunel baslatiliyor, birkac saniye icinde yenileyin..."}
 
 @app.post("/soc/tunnel/stop")
 async def stop_public_tunnel(analyst: str = Depends(verify_soc_analyst)):
@@ -350,7 +362,7 @@ async def canary_triggered(request: Request, canary_id: str, filename: str = "")
 @app.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
 async def deception_catch_all(request: Request, full_path: str):
     attacker_ip = get_real_attacker_ip(request)
-    
+
     if is_ip_blocked(attacker_ip):
         return Response(content='{"error": "IP Quarantined by Active Defense"}', media_type="application/json", status_code=403)
 
@@ -370,7 +382,7 @@ async def deception_catch_all(request: Request, full_path: str):
     attack_type = classify_attack(path_str, query_str, body_str)
     fp = analyze_client_fingerprint(headers_dict)
     threat_info = calculate_threat_score(attacker_ip, attack_type, fp["confidence"])
-    
+
     canary_id = generate_canary_id()
     dynamic_host = get_dynamic_callback_host(request)
     canary_traps = inject_canary_links(dynamic_host, canary_id)

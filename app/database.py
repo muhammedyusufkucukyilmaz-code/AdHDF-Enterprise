@@ -33,6 +33,24 @@ def init_db():
             conn.execute("ALTER TABLE incidents ADD COLUMN unbanned INTEGER DEFAULT 0")
         conn.commit()
 
+def insert_incident(
+    timestamp: str,
+    event_type: str,
+    ip: str,
+    path: str,
+    tool_detected: str,
+    risk_score: int,
+    canary_id: str,
+    payload: str,
+    ai_output: str
+):
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO incidents (timestamp, event_type, ip, path, tool_detected, risk_score, canary_id, payload, ai_output, unbanned)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+        """, (timestamp, event_type, ip, path, tool_detected, int(risk_score), canary_id, payload, ai_output))
+        conn.commit()
+
 def purge_expired_bans():
     ttl_hours = int(os.getenv("BAN_TTL_HOURS", "24"))
     if ttl_hours <= 0:

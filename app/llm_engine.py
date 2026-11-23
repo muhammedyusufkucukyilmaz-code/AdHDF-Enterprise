@@ -3,26 +3,38 @@ import json
 import time
 import asyncio
 import urllib.request
+from urllib.parse import urlparse
 from openai import AsyncOpenAI
 
 _LLM_SEMAPHORE = asyncio.Semaphore(2)
 
 def normalize_openai_base_url(raw_url: str) -> str:
-    url = (raw_url or "").strip().rstrip("/")
-    if not url:
+    candidate = (raw_url or "").strip()
+    if not candidate:
         return "http://127.0.0.1:11434/v1"
-    if not url.startswith(("http://", "https://")):
-        url = f"http://{url}"
-    if not url.endswith("/v1"):
-        url = f"{url}/v1"
-    return url
+    if not candidate.startswith(("http://", "https://")):
+        candidate = f"http://{candidate}"
+    parsed = urlparse(candidate)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ValueError("Gecersiz LLM adresi: yalnizca http veya https desteklenir.")
+    if parsed.hostname == "169.254.169.254" or parsed.username or parsed.password:
+        raise ValueError("Guvenlik politikasi nedeniyle bu LLM adresi engellendi.")
+    port_part = f":{parsed.port}" if parsed.port else ""
+    path_clean = parsed.path.rstrip("/")
+    if not path_clean.endswith("/v1"):
+        path_clean = f"{path_clean}/v1" if path_clean else "/v1"
+    return f"{parsed.scheme}://{parsed.hostname}{port_part}{path_clean}"
 
 def get_deception_config():
+    try:
+        safe_url = normalize_openai_base_url(os.getenv("LLM_BASE_URL", "http://127.0.0.1:11434/v1"))
+    except ValueError:
+        safe_url = "http://127.0.0.1:11434/v1"
     return {
         "mode": os.getenv("DECEPTION_MODE", "static_only").lower(),
-        "base_url": normalize_openai_base_url(os.getenv("LLM_BASE_URL", "http://127.0.0.1:11434/v1")),
-        "model": os.getenv("LLM_MODEL", "qwen2.5-coder:7b").strip(),
-        "api_key": os.getenv("LLM_API_KEY", "ollama").strip() or "ollama"
+        "base_url": safe_url,
+        "model": os.getenv("LLM_MODEL", "qwen2.5-coder:7b").strip()[:100],
+        "api_key": os.getenv("LLM_API_KEY", "ollama").strip()[:120] or "ollama"
     }
 
 def probe_llm_endpoint(base_url: str, api_key: str = "ollama") -> dict:
@@ -42,13 +54,13 @@ def probe_llm_endpoint(base_url: str, api_key: str = "ollama") -> dict:
                 "reachable": True,
                 "base_url": clean_url,
                 "latency_ms": latency_ms,
-                "models": models
+                "models": models[:30]
             }
     except Exception as exc:
         return {
             "reachable": False,
             "base_url": clean_url,
-            "error": str(exc),
+            "error": str(exc)[:160],
             "models": []
         }
 
