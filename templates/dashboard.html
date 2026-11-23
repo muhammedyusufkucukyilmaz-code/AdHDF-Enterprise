@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
@@ -7,6 +7,175 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body class="bg-[#090d16] text-slate-200 font-mono min-h-screen">
+<div class="bg-slate-900 border border-slate-800 rounded-xl p-4 mb-6 space-y-3">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="text-xs font-bold uppercase tracking-wider text-cyan-400">Deception Engine:</span>
+      <select id="cfgMode" class="bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5">
+        <option value="static_only">AI-Free Mode (Zero-GPU / Instant Canary)</option>
+        <option value="hybrid_ai">Local LLM Mode (Ollama / LM Studio / Custom IP)</option>
+      </select>
+      <input id="cfgUrl" type="text" placeholder="http://127.0.0.1:11434/v1" class="bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 w-52" />
+      <input id="cfgModel" list="discoveredModels" type="text" placeholder="qwen2.5-coder:7b" class="bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 w-44" />
+      <datalist id="discoveredModels"></datalist>
+      <input id="cfgKey" type="password" placeholder="API Key" class="bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 w-24" />
+      <input id="cfgTtl" type="number" min="0" max="720" value="24" title="Ban TTL (Saat, 0 = Kalıcı)" class="bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg px-2 py-1.5 w-16" />
+      <button onclick="autoDetectLLM()" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-cyan-300 text-xs font-semibold px-2.5 py-1.5 rounded-lg">Auto-Detect AI</button>
+      <button onclick="testLLMConnection()" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-amber-300 text-xs font-semibold px-2.5 py-1.5 rounded-lg">Test</button>
+      <button onclick="saveEngineConfig()" class="bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg">Apply & Save</button>
+    </div>
+    <div class="flex items-center gap-2">
+      <button onclick="startPublicTunnel()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg">Start Public Tunnel</button>
+      <button onclick="stopPublicTunnel()" class="bg-rose-700 hover:bg-rose-600 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg">Stop</button>
+    </div>
+  </div>
+  <div class="flex flex-wrap items-center justify-between text-xs border-t border-slate-800 pt-2">
+    <span id="tunnelInfo" class="text-slate-400">Public Honeypot Tunnel: Inactive (Localhost Mode)</span>
+    <span id="cfgStatus" class="font-medium text-emerald-400"></span>
+  </div>
+  <div id="quarantineBar" class="hidden border-t border-slate-800 pt-2">
+    <span class="text-[11px] font-bold uppercase text-rose-400 mr-2">Active Quarantined IPs (Click to Unban):</span>
+    <span id="quarantineChips" class="inline-flex flex-wrap gap-1.5"></span>
+  </div>
+</div>
+<script>
+function setStatus(msg, isError=false) {
+  const st = document.getElementById('cfgStatus');
+  st.className = isError ? 'text-xs font-medium text-rose-400' : 'text-xs font-medium text-emerald-400';
+  st.textContent = msg;
+}
+function populateModelList(models) {
+  const dl = document.getElementById('discoveredModels');
+  dl.innerHTML = '';
+  (models || []).forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m;
+    dl.appendChild(opt);
+  });
+}
+async function loadEngineConfig() {
+  try {
+    const res = await fetch('/soc/config');
+    if (!res.ok) return;
+    const cfg = await res.json();
+    document.getElementById('cfgMode').value = cfg.mode || 'static_only';
+    document.getElementById('cfgUrl').value = cfg.base_url || 'http://127.0.0.1:11434/v1';
+    document.getElementById('cfgModel').value = cfg.model || 'qwen2.5-coder:7b';
+    document.getElementById('cfgKey').value = cfg.api_key || 'ollama';
+    document.getElementById('cfgTtl').value = cfg.ban_ttl_hours ?? 24;
+    if (cfg.tunnel && cfg.tunnel.running && cfg.tunnel.url) {
+      document.getElementById('tunnelInfo').innerHTML = `Public Honeypot Active: <a href="${cfg.tunnel.url}" target="_blank" class="text-cyan-400 underline">${cfg.tunnel.url}</a>`;
+    }
+  } catch (e) {}
+}
+async function refreshQuarantineChips() {
+  try {
+    const res = await fetch('/soc/stats');
+    if (!res.ok) return;
+    const data = await res.json();
+    const bar = document.getElementById('quarantineBar');
+    const chips = document.getElementById('quarantineChips');
+    if (data.blocklist && data.blocklist.length > 0) {
+      bar.classList.remove('hidden');
+      chips.innerHTML = data.blocklist.map(b =>
+        `<button onclick="unbanIP('${b.ip}')" class="bg-rose-950 hover:bg-rose-800 border border-rose-700 text-rose-200 text-[11px] px-2 py-0.5 rounded-full transition" title="Score: ${b.max_risk_score} — Click to Unban">${b.ip} ✕</button>`
+      ).join('');
+    } else {
+      bar.classList.add('hidden');
+    }
+  } catch (e) {}
+}
+async function unbanIP(ip) {
+  const res = await fetch('/soc/unban', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ip})
+  });
+  if (res.ok) {
+    setStatus(`IP ${ip} unbanned from Firewall & SQLite.`);
+    refreshQuarantineChips();
+  }
+}
+async function startPublicTunnel() {
+  setStatus('Starting Cloudflare Tunnel...');
+  const res = await fetch('/soc/tunnel/start', {method: 'POST'});
+  const data = await res.json();
+  if (data.running && data.url) {
+    document.getElementById('tunnelInfo').innerHTML = `Public Honeypot Active: <span class="text-cyan-400 font-mono">${data.url}</span>`;
+    setStatus('Public Honeypot Tunnel is LIVE!');
+  } else {
+    setStatus(data.error || 'Tunnel failed.', true);
+  }
+}
+async function stopPublicTunnel() {
+  await fetch('/soc/tunnel/stop', {method: 'POST'});
+  document.getElementById('tunnelInfo').textContent = 'Public Honeypot Tunnel: Stopped';
+  setStatus('Public tunnel stopped.');
+}
+async function autoDetectLLM() {
+  setStatus('Scanning local AI ports...');
+  const res = await fetch('/soc/llm/discover');
+  const data = await res.json();
+  if (data.discovered && data.discovered.length > 0) {
+    const first = data.discovered[0];
+    document.getElementById('cfgMode').value = 'hybrid_ai';
+    document.getElementById('cfgUrl').value = first.base_url;
+    populateModelList(first.models);
+    if (first.models.length > 0) document.getElementById('cfgModel').value = first.models[0];
+    setStatus(`Found ${first.provider} (${first.latency_ms}ms) — ${first.models.length} model(s).`);
+  } else {
+    document.getElementById('cfgMode').value = 'static_only';
+    setStatus('No local LLM found. Switched to AI-Free Mode.', true);
+  }
+}
+async function testLLMConnection() {
+  setStatus('Testing endpoint...');
+  const res = await fetch('/soc/llm/test', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      mode: document.getElementById('cfgMode').value,
+      base_url: document.getElementById('cfgUrl').value,
+      model: document.getElementById('cfgModel').value,
+      api_key: document.getElementById('cfgKey').value || 'ollama'
+    })
+  });
+  const data = await res.json();
+  if (data.reachable) {
+    populateModelList(data.models);
+    setStatus(`Connected (${data.latency_ms}ms) — ${data.models.length} model(s).`);
+  } else {
+    setStatus(`Unreachable (${data.base_url}). AI-Free fallback active.`, true);
+  }
+}
+async function saveEngineConfig() {
+  const res = await fetch('/soc/config', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      mode: document.getElementById('cfgMode').value,
+      base_url: document.getElementById('cfgUrl').value,
+      model: document.getElementById('cfgModel').value,
+      api_key: document.getElementById('cfgKey').value || 'ollama',
+      ban_ttl_hours: parseInt(document.getElementById('cfgTtl').value || '24', 10)
+    })
+  });
+  if (res.ok) {
+    const data = await res.json();
+    document.getElementById('cfgUrl').value = data.config.base_url;
+    setStatus('Configuration saved & applied live.');
+  } else {
+    setStatus('Failed to save configuration.', true);
+  }
+}
+window.addEventListener('DOMContentLoaded', () => {
+  loadEngineConfig();
+  refreshQuarantineChips();
+  setInterval(refreshQuarantineChips, 8000);
+});
+</script>
+
+
     <nav class="border-b border-slate-800/80 bg-[#0d1320]/90 backdrop-blur sticky top-0 z-30 px-6 py-4">
         <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-4">
             <div class="flex items-center gap-3">
@@ -256,3 +425,6 @@
     </script>
 </body>
 </html>
+
+
+
