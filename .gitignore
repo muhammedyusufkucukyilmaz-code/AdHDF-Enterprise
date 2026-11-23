@@ -1,0 +1,17 @@
+﻿# Hassas Yapılandırma ve Parolalar
+.env
+*.env
+
+# Veritabanı ve Log Dosyaları
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Sanal Ortam ve Derleme Çıktıları
+venv/
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.spec

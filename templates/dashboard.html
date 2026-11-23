@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>AdHDF | Enterprise AI Deception & Threat Intel SOC</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-[#090d16] text-slate-200 font-mono min-h-screen">
+    <nav class="border-b border-slate-800/80 bg-[#0d1320]/90 backdrop-blur sticky top-0 z-30 px-6 py-4">
+        <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-4">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-lg">
+                    🛡️
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h1 class="text-lg font-bold tracking-wider text-white">AdHDF <span class="text-emerald-400">ENTERPRISE</span></h1>
+                        <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">HARDENED v1.1</span>
+                    </div>
+                    <p class="text-[11px] text-slate-400">Adaptive AI-Driven HoneyToken, Threat Scoring & Active Deception SOC</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <span class="flex items-center gap-2 px-3 py-1.5 bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 rounded-md text-xs">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                    IPS & XSS SHIELD ACTIVE
+                </span>
+                <a href="/soc/export" class="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded-md text-xs transition flex items-center gap-1">
+                    ⬇ SIEM Raporu İndir (JSON)
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto p-6 space-y-6">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-[#0f1626] border border-slate-800 p-4 rounded-xl">
+                <p class="text-[11px] text-slate-400 uppercase tracking-wider">Toplam Yakalanan Probe</p>
+                <p id="total-events" class="text-3xl font-bold text-white mt-2">0</p>
+                <p class="text-[11px] text-emerald-400 mt-1">Proxy IP Doğrulaması Aktif</p>
+            </div>
+            <div class="bg-[#0f1626] border border-red-900/60 p-4 rounded-xl">
+                <p class="text-[11px] text-red-400 uppercase tracking-wider">Tetiklenen Canary Tuzak</p>
+                <p id="canary-triggers" class="text-3xl font-bold text-red-500 mt-2">0</p>
+                <p class="text-[11px] text-red-400/70 mt-1">Anlık Webhook Alarmı Aktif</p>
+            </div>
+            <div class="bg-[#0f1626] border border-slate-800 p-4 rounded-xl">
+                <p class="text-[11px] text-slate-400 uppercase tracking-wider">Tekil Saldırgan / Kritik Aktör</p>
+                <p class="text-3xl font-bold text-cyan-400 mt-2"><span id="unique-ips">0</span> <span class="text-sm text-red-400">/ <span id="critical-actors">0</span> Kritik</span></p>
+                <p class="text-[11px] text-slate-500 mt-1">Otomatik Karantina Aktif</p>
+            </div>
+            <div class="bg-[#0f1626] border border-slate-800 p-4 rounded-xl">
+                <p class="text-[11px] text-slate-400 uppercase tracking-wider">Son Tespit Edilen Araç</p>
+                <p id="last-tool" class="text-base font-bold text-amber-400 mt-3 truncate">-</p>
+                <p class="text-[11px] text-slate-500 mt-1">HTTP Header Sequence FP</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-[#0f1626] border border-slate-800 p-5 rounded-xl">
+                <h3 class="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-4">Saldırı Vektörü Dağılımı</h3>
+                <div class="h-56 flex items-center justify-center">
+                    <canvas id="attackChart"></canvas>
+                </div>
+            </div>
+            <div class="bg-[#0f1626] border border-slate-800 p-5 rounded-xl">
+                <h3 class="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-4">Tespit Edilen İstismar & Tarama Araçları</h3>
+                <div class="h-56 flex items-center justify-center">
+                    <canvas id="toolChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-[#0f1626] border border-slate-800 rounded-xl overflow-hidden shadow-xl">
+            <div class="p-4 border-b border-slate-800 flex flex-wrap justify-between items-center gap-3">
+                <div>
+                    <h2 class="text-sm font-bold text-white">CANLI TEHDİT TELEMETRİSİ & RİSK KORELASYONU</h2>
+                    <p class="text-[11px] text-slate-400">Saldırgana sunulan dinamik AI yanıtını ve teknik detayları incelemek için satıra tıklayın</p>
+                </div>
+                <input type="text" id="search-input" onkeyup="renderTable()" placeholder="IP, Risk Skoru, Araç veya Canary ID ara..." 
+                    class="bg-[#090d16] border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-500 w-72">
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                    <thead class="bg-[#090d16] text-slate-400 border-b border-slate-800 uppercase text-[11px]">
+                        <tr>
+                            <th class="p-3.5">Zaman (UTC)</th>
+                            <th class="p-3.5">Risk Skoru</th>
+                            <th class="p-3.5">Saldırı Sınıfı</th>
+                            <th class="p-3.5">Parmak İzi (Araç)</th>
+                            <th class="p-3.5">Hedef Yol</th>
+                            <th class="p-3.5">Canary ID</th>
+                            <th class="p-3.5">Saldırgan IP</th>
+                            <th class="p-3.5 text-right">Detay</th>
+                        </tr>
+                    </thead>
+                    <tbody id="events-table" class="divide-y divide-slate-800/60"></tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <div id="detail-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
+        <div class="bg-[#0f1626] border border-slate-700 rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-4 shadow-2xl">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                <h3 class="text-base font-bold text-emerald-400">🔍 Olay Teknik Analizi & AI Aldatma Çıktısı</h3>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-white text-lg font-bold">✕</button>
+            </div>
+            <div id="modal-content" class="space-y-4 text-xs"></div>
+        </div>
+    </div>
+
+    <script>
+        let allEvents = [];
+        let attackChartInstance = null;
+        let toolChartInstance = null;
+
+        // STORED XSS KORUMASI: Tüm saldırgan girdilerini güvenli HTML metnine dönüştürür
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function updateCharts(attackDist, toolDist) {
+            const ctx1 = document.getElementById('attackChart').getContext('2d');
+            const ctx2 = document.getElementById('toolChart').getContext('2d');
+
+            if (attackChartInstance) attackChartInstance.destroy();
+            if (toolChartInstance) toolChartInstance.destroy();
+
+            attackChartInstance = new Chart(ctx1, {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(attackDist),
+                    datasets: [{
+                        data: Object.values(attackDist),
+                        backgroundColor: ['#f59e0b', '#ef4444', '#06b6d4', '#10b981', '#8b5cf6'],
+                        borderColor: '#0f1626',
+                        borderWidth: 2
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: '#94a3b8', font: { family: 'monospace', size: 11 } } } } }
+            });
+
+            toolChartInstance = new Chart(ctx2, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(toolDist),
+                    datasets: [{
+                        label: 'İstek Sayısı',
+                        data: Object.values(toolDist),
+                        backgroundColor: '#10b981',
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { color: '#94a3b8', font: { family: 'monospace', size: 10 } }, grid: { display: false } },
+                        y: { ticks: { color: '#94a3b8', stepSize: 1 }, grid: { color: '#1e293b' } }
+                    }
+                }
+            });
+        }
+
+        function openModal(index) {
+            const ev = allEvents[index];
+            if (!ev) return;
+            document.getElementById('modal-content').innerHTML = `
+                <div class="grid grid-cols-2 gap-3 bg-[#090d16] p-3 rounded-lg border border-slate-800">
+                    <div><span class="text-slate-500">Saldırı Türü:</span> <span class="text-amber-400 font-bold">${escapeHtml(ev.event_type)}</span></div>
+                    <div><span class="text-slate-500">Tehdit Skoru:</span> <span class="text-red-400 font-bold">${escapeHtml(ev.risk_score)}/100 (${escapeHtml(ev.severity)})</span></div>
+                    <div><span class="text-slate-500">Kaynak IP:</span> <span class="text-white">${escapeHtml(ev.attacker_ip)} (${escapeHtml(ev.total_hits_from_ip)}. istek)</span></div>
+                    <div><span class="text-slate-500">Tespit Edilen Araç:</span> <span class="text-cyan-400">${escapeHtml(ev.detected_tool)}</span></div>
+                </div>
+                <div>
+                    <p class="text-slate-400 mb-1 font-semibold">HTTP Header Sırası (Fingerprinting İmzası):</p>
+                    <pre class="bg-[#090d16] p-3 rounded-lg border border-slate-800 text-slate-300 overflow-x-auto">${escapeHtml(ev.header_sequence || ev.user_agent)}</pre>
+                </div>
+                <div>
+                    <p class="text-slate-400 mb-1 font-semibold">Saldırganın Gönderdiği Payload (XSS İzole):</p>
+                    <pre class="bg-[#090d16] p-3 rounded-lg border border-slate-800 text-red-300 overflow-x-auto">${escapeHtml(ev.payload || '(Body boş)')}</pre>
+                </div>
+                <div>
+                    <p class="text-emerald-400 mb-1 font-semibold">🤖 Qwen 2.5 Tarafından Üretilen Dinamik Tuzak Yanıtı:</p>
+                    <pre class="bg-[#090d16] p-3 rounded-lg border border-emerald-900/50 text-emerald-300 whitespace-pre-wrap">${escapeHtml(ev.served_response)}</pre>
+                </div>
+            `;
+            document.getElementById('detail-modal').classList.remove('hidden');
+            document.getElementById('detail-modal').classList.add('flex');
+        }
+
+        function closeModal() {
+            document.getElementById('detail-modal').classList.add('hidden');
+            document.getElementById('detail-modal').classList.remove('flex');
+        }
+
+        function renderTable() {
+            const query = document.getElementById('search-input').value.toLowerCase();
+            const tbody = document.getElementById('events-table');
+            tbody.innerHTML = '';
+
+            allEvents.forEach((ev, idx) => {
+                const searchable = `${ev.event_type} ${ev.severity} ${ev.detected_tool} ${ev.target_path} ${ev.canary_id} ${ev.attacker_ip}`.toLowerCase();
+                if (!searchable.includes(query)) return;
+
+                const score = Number(ev.risk_score) || 15;
+                let scoreBadge = 'bg-slate-800 text-slate-300 border-slate-700';
+                if (score >= 80) scoreBadge = 'bg-red-950 text-red-400 border-red-600 font-bold';
+                else if (score >= 50) scoreBadge = 'bg-orange-950 text-orange-400 border-orange-700 font-semibold';
+                else if (score >= 25) scoreBadge = 'bg-amber-950 text-amber-400 border-amber-700';
+
+                tbody.innerHTML += `
+                    <tr onclick="openModal(${idx})" class="hover:bg-slate-800/50 cursor-pointer transition">
+                        <td class="p-3.5 text-slate-400">${escapeHtml(ev.timestamp.split('T')[1].replace('Z',''))}</td>
+                        <td class="p-3.5"><span class="px-2 py-0.5 border rounded text-[11px] ${scoreBadge}">${score}/100 (${escapeHtml(ev.severity)})</span></td>
+                        <td class="p-3.5 text-slate-200 font-medium">${escapeHtml(ev.event_type)}</td>
+                        <td class="p-3.5 text-cyan-400">${escapeHtml(ev.detected_tool)}</td>
+                        <td class="p-3.5 text-slate-300">${escapeHtml(ev.target_path)}</td>
+                        <td class="p-3.5 text-emerald-400">${escapeHtml(ev.canary_id)}</td>
+                        <td class="p-3.5 text-slate-300 font-semibold">${escapeHtml(ev.attacker_ip)}</td>
+                        <td class="p-3.5 text-right text-slate-400 hover:text-white">İncele →</td>
+                    </tr>
+                `;
+            });
+        }
+
+        async function fetchStats() {
+            try {
+                const res = await fetch('/soc/stats');
+                const data = await res.json();
+                document.getElementById('total-events').innerText = data.total_events;
+                document.getElementById('canary-triggers').innerText = data.canary_triggers;
+                document.getElementById('unique-ips').innerText = data.unique_ips;
+                document.getElementById('critical-actors').innerText = data.critical_actors || 0;
+
+                allEvents = data.recent_events;
+                if (allEvents.length > 0) {
+                    document.getElementById('last-tool').innerText = allEvents[0].detected_tool;
+                }
+                renderTable();
+                updateCharts(data.attack_distribution, data.tool_distribution);
+            } catch (e) { console.error(e); }
+        }
+
+        fetchStats();
+        setInterval(fetchStats, 4000);
+    </script>
+</body>
+</html>
