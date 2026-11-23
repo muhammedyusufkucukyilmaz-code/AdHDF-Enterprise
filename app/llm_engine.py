@@ -2,11 +2,26 @@
 import json
 import time
 import asyncio
+import ipaddress
 import urllib.request
 from urllib.parse import urlparse
 from openai import AsyncOpenAI
 
 _LLM_SEMAPHORE = asyncio.Semaphore(2)
+
+def _is_forbidden_host(hostname: str) -> bool:
+    h = (hostname or "").strip().lower()
+    if not h or h == "169.254.169.254" or h.endswith(".internal") or h.endswith(".local"):
+        return True
+    if h in ("localhost", "127.0.0.1", "::1"):
+        return False
+    try:
+        ip_obj = ipaddress.ip_address(h)
+        if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_multicast or ip_obj.is_reserved or ip_obj.is_unspecified:
+            return True
+    except ValueError:
+        return False
+    return False
 
 def normalize_openai_base_url(raw_url: str) -> str:
     candidate = (raw_url or "").strip()
@@ -17,13 +32,24 @@ def normalize_openai_base_url(raw_url: str) -> str:
     parsed = urlparse(candidate)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ValueError("Gecersiz LLM adresi: yalnizca http veya https desteklenir.")
-    if parsed.hostname == "169.254.169.254" or parsed.username or parsed.password:
-        raise ValueError("Guvenlik politikasi nedeniyle bu LLM adresi engellendi.")
+    if parsed.username or parsed.password or _is_forbidden_host(parsed.hostname):
+        raise ValueError("Guvenlik politikasi nedeniyle bu LLM adresi engellendi (yalnizca yerel 127.0.0.1/localhost veya guvenli harici URL desteklenir).")
     port_part = f":{parsed.port}" if parsed.port else ""
     path_clean = parsed.path.rstrip("/")
     if not path_clean.endswith("/v1"):
         path_clean = f"{path_clean}/v1" if path_clean else "/v1"
     return f"{parsed.scheme}://{parsed.hostname}{port_part}{path_clean}"
+
+def validate_webhook_url(raw_url: str) -> str:
+    val = (raw_url or "").strip()
+    if not val:
+        return ""
+    parsed = urlparse(val)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ValueError("Webhook URL yalnizca http veya https ile baslamalidir.")
+    if parsed.username or parsed.password or _is_forbidden_host(parsed.hostname):
+        raise ValueError("Guvenlik politikasi nedeniyle dahili/ozel ag webhook adresleri engellendi.")
+    return val
 
 def get_deception_config():
     try:
